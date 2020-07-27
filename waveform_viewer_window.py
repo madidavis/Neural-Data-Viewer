@@ -4,11 +4,10 @@ from PyQt5.QtCore import *
 import pyqtgraph as pg
 from pyqtgraph import PlotWidget, plot
 from datetime import datetime
+import sys, os
 #load custom Libraries
 from neural_data_class import *
 from main import *
-
-import sys
 
 #*** CUSTOM CLASS DEFINITIONS***#
 #create a pyqtgraph plot of a neural data channel
@@ -80,18 +79,134 @@ class Neural_Graph():
             if not self.is_hidden:
                 self.hide_plot() #show unmarked plot
 
-#create a main window
-class MainWindow(QMainWindow):
+class Playback_Controls():
+    def __init__(self, window, layout):
+        #TOOLBAR PROPERTIES
+        self.window = window
+        self.layout = layout
+        self.toolbar = QToolBar("Playback Controls")
+        self.width = self.toolbar.frameGeometry().width()
+        self.height = self.toolbar.frameGeometry().height()
+        self.setup_toolbar()
 
-    def __init__(self, *args, **kwargs):
-        super(MainWindow, self).__init__(*args, **kwargs)
+        #BUTTON PROPETIES
+        #back skip button
+        self.bskip_button = QToolButton()
+        self.bskip_button.setText("Back Skip")
+        self.bskip_button.clicked.connect(self.backskip_to_start)
+        self.toolbar.addWidget(self.bskip_button)
 
-        #Define Main Window QtWidgets
-        self.setWindowTitle("Real Time Data Visualiser")
-        self.window_width = self.frameGeometry().width()
-        self.window_height = self.frameGeometry().height()
+        #rewind/backwards play button
+        self.rewind_button = QToolButton()
+        self.rewind_button.setText("Rewind")
+        self.rewind_button.clicked.connect(self.reverse_plot_data)
+        self.toolbar.addWidget(self.rewind_button)
+
+        #button to play/pause data
+        self.play_pause_button = QToolButton()
+        self.play_pause_button.setText("Play/Pause")
+        self.play_pause_button.clicked.connect(self.play_pause_plot_data)
+        self.toolbar.addWidget(self.play_pause_button)
+
+        #button to forwards play data
+        self.forward_button = QToolButton()
+        self.forward_button.setText("Forward")
+        self.forward_button.clicked.connect(self.forward_plot_data)
+        self.toolbar.addWidget(self.forward_button)
+
+        #button to skip to current data
+        self.fskip_button = QToolButton()
+        self.fskip_button.setText("Forward Skip")
+        self.fskip_button.clicked.connect(self.fskip_to_current_pos)
+        self.toolbar.addWidget(self.fskip_button)
+
+        #SPEED CONTROL PROPERTIES
+        #drop down menu that allows user to select speed properties
+        self.speed_list = [0.25,0.5,0.75,1,2]
+        self.speed_control = QComboBox()
+        self.speed_control.addItem("Speed")
+        for speed in self.speed_list:
+            self.speed_control.addItem(str(speed)+"x")
+        self.speed_control.currentIndexChanged.connect(self.change_plotting_speed)
+        self.toolbar.addWidget(self.speed_control)
+
+    #set up main toolbar features
+    def setup_toolbar(self):
+        self.toolbar.setMovable(False)
+        self.toolbar.setStyleSheet("QToolBar{spacing:50px; background: white}")
+        self.layout.addWidget(self.toolbar)
+
+    #BUTTON METHODS
+    #Pause live stream of data when play/pause button is clicked
+    def play_pause_plot_data(self):
+        if (self.window.timer.isActive()):
+            #if timer is running pause
+            print('pause')
+            self.window.timer.stop()
+        else:
+            #if timer is paused then restart
+            print('play')
+            self.window.timer.start()
+
+    #Reverse the plotting of data when reverse button clicked
+    def reverse_plot_data(self):
+        if self.window.timer.isActive():
+            if not self.window.is_timer_reversed:
+                self.window.timer.timeout.connect(self.window.reverse_update_plot_data)
+                self.window.timer.timeout.connect(self.window.reverse_update_plot_data)
+                self.window.is_timer_reversed = True
+        else:
+            pass
+
+    #Forward play the plotting of data when forward button clicked
+    def forward_plot_data(self):
+        if self.window.timer.isActive():
+            if self.window.is_timer_reversed:
+                self.window.timer.timeout.connect(self.window.update_plot_data)
+                self.window.timer.timeout.connect(self.window.update_plot_data)
+                self.window.is_timer_reversed = False
+        else:
+            pass
 
 
+
+    #When Backskip button is pressed skip back to start data values
+    def backskip_to_start(self):
+        #reinitialise visible data values
+        data.curr_range = [0,3000]
+        data.visible_xdata = data.update_xrange(data.curr_range[0],data.curr_range[1])
+        data.visible_ydata = data.update_yrange(data.curr_range[0],data.curr_range[1])
+        #if in reverse, switch back to forward play
+        if self.window.is_timer_reversed:
+            self.window.timer.timeout.connect(self.window.update_plot_data)
+            self.window.timer.timeout.connect(self.window.update_plot_data)
+            self.window.is_timer_reversed = False
+            self.window.timer.start()
+        #if data is currently paused, replot
+        if not self.window.timer.isActive():
+            for graph in self.window.graph_list:
+                graph.graph.plot(data.visible_xdata, data.visible_ydata[graph.channel],
+                                    pen=graph.pen, clear=True)
+
+    #When forward skip button selected skip to current data
+    def fskip_to_current_pos(self):
+        data_min, data_max = data.hidden_range
+        data.curr_range = [data_min, data_max]
+
+    #SPEED CONTROL METHODS
+    def change_plotting_speed(self, index):
+        if index == 0:
+            speed_val = 1
+        else:
+            speed_val = self.speed_list[index-1]
+        #alter the inncrement of visible data to change speed of plotting
+        data.incr = int(speed_val*3000)
+
+
+class Neural_Data_Window(QWidget):
+
+    def __init__(self):
+        super().__init__()
         #TIMER PROPERTIES#
         #Set timer for real time graph plotting
         self.timer = QTimer()
@@ -106,11 +221,10 @@ class MainWindow(QMainWindow):
         self.hidden_timer.timeout.connect(self.update_hidden_plot_data)
         self.hidden_timer.start()
 
+
         #GRAPH PROPERTIES
         #Graph Channel layouts
         self.graph_vbox = QVBoxLayout() #create vertical layout to stack channels
-
-        #Widget for Graph Display
         #plot the number of active Neural data channels
         self.graph_colour_list = [(81, 216, 240), (245, 185, 73), (135, 242, 85),
                                     (245, 91, 73), (181, 108, 245), (250, 233, 82)]
@@ -121,63 +235,15 @@ class MainWindow(QMainWindow):
             self.graph_vbox.addLayout(graph.container)
             self.graph_list.append(graph)
 
+        #PLAYBACK PROPERTIES
+        self.playback_controls = Playback_Controls(self, self.graph_vbox)
 
-
+        #SET UP WINDOW LAYOUT
         #set layout by placing in a container
         self.graph_container = QWidget()
         self.graph_container.setLayout(self.graph_vbox)
 
-        self.setCentralWidget(self.graph_container)
-
-
-
-        #PLAYBACK PROPERTIES
-        #Playback Control Toolbar
-        self.playback_controls = QToolBar("Plotting Playback Controls")
-        self.playback_controls.setMovable(False)
-        self.addToolBar(Qt.BottomToolBarArea, self.playback_controls)
-        self.playback_width = self.playback_controls.frameGeometry().width()
-        self.playback_height = self.playback_controls.frameGeometry().height()
-        self.playback_controls.setStyleSheet("QToolBar{spacing:50px; background: white}")
-        self.resizeEvent = self.resize_widgets
-
-        #Add Buttons for Playback Control
-        bskip_button = QToolButton()
-        bskip_button.setText("Back Skip")
-        bskip_button.clicked.connect(self.backskip_to_start)
-        self.playback_controls.addWidget(bskip_button)
-
-        rewind_button = QToolButton()
-        rewind_button.setText("Rewind")
-        rewind_button.clicked.connect(self.reverse_plot_data)
-        self.playback_controls.addWidget(rewind_button)
-
-        play_pause_button = QToolButton()
-        play_pause_button.setText("Play/Pause")
-        play_pause_button.clicked.connect(self.play_pause_plot_data)
-        self.playback_controls.addWidget(play_pause_button)
-
-        forward_button = QToolButton()
-        forward_button.setText("Forward")
-        forward_button.clicked.connect(self.forward_plot_data)
-        self.playback_controls.addWidget(forward_button)
-
-        fskip_button = QToolButton()
-        fskip_button.setText("Forward Skip")
-        fskip_button.clicked.connect(self.fskip_to_current_pos)
-        self.playback_controls.addWidget(fskip_button)
-
-        #buttons for play speed control
-        self.speeds = [0.25,0.5,0.75,1,2]
-        speed_control = QComboBox(self)
-        speed_control.addItem("Speed") #header
-        for speed in self.speeds:
-            speed_control.addItem(str(speed)+"x")
-        speed_control.currentIndexChanged.connect(self.change_plotting_speed)
-        self.playback_controls.addWidget(speed_control)
-
-
-    #Change Size of widgets when main window is resized
+        #Change Size of widgets when main window is resized
     def resize_widgets(self, event):
         playback_width = self.playback_controls.frameGeometry().width()
 
@@ -191,7 +257,7 @@ class MainWindow(QMainWindow):
             data.update_data_range()
         #set new data on plot
         for graph in self.graph_list:
-            graph.graph.plot(data.visible_xdata, data.visible_ydata[0],
+            graph.graph.plot(data.visible_xdata, data.visible_ydata[graph.channel],
                                                 pen=graph.pen,
                                                  clear=True)
 
@@ -219,87 +285,26 @@ class MainWindow(QMainWindow):
             data.reverse_data_range()
         #set new data on plot
         for graph in self.graph_list:
-            graph.graph.plot(data.visible_xdata, data.visible_ydata[0],
+            graph.graph.plot(data.visible_xdata, data.visible_ydata[graph.channel],
                                                 pen=graph.pen,
                                                 clear=True)
 
 
-    #Pause live stream of data when play/pause button is clicked
-    def play_pause_plot_data(self):
-        print(data.curr_range, data.hidden_range)
-        if (self.timer.isActive()):
-            #if timer is running pause
-            print('pause')
-            self.timer.stop()
-        else:
-            #if timer is paused then restart
-            print('play')
-            self.timer.start()
 
-    #Reverse the plotting of data
-    def reverse_plot_data(self):
-        print("start rev", self.is_timer_reversed)
-        print("timer = ", self.timer.isActive())
-        print(data.curr_range, data.hidden_range)
-        if self.timer.isActive():
-            if not self.is_timer_reversed:
-                self.timer.timeout.connect(self.reverse_update_plot_data)
-                self.timer.timeout.connect(self.reverse_update_plot_data)
-                self.is_timer_reversed = True
-                print("end rev", self.is_timer_reversed)
-        else:
-            pass
+class MainWindow(QMainWindow):
 
+    def __init__(self, *args, **kwargs):
+        super(MainWindow, self).__init__(*args, **kwargs)
 
-    #Forward play the plotting of data
-    def forward_plot_data(self):
-        print("start forward", self.is_timer_reversed)
-        print("timer = ", self.timer.isActive())
-        if self.timer.isActive():
-            if self.is_timer_reversed:
-                self.timer.timeout.connect(self.update_plot_data)
-                self.timer.timeout.connect(self.update_plot_data)
-                self.is_timer_reversed = False
-                print("end forward", self.is_timer_reversed)
-        else:
-            pass
+        #Define Main Window QtWidgets
+        self.setWindowTitle("Real Time Data Visualiser")
+        self.window_width = self.frameGeometry().width()
+        self.window_height = self.frameGeometry().height()
 
-    #Skip back to the start values when backskip button is selected
-    def backskip_to_start(self):
-        #reinitialise visible data values
-        data.curr_range = [0,3000]
-        data.visible_xdata = data.update_xrange(data.curr_range[0],data.curr_range[1])
-        data.visible_ydata = data.update_yrange(data.curr_range[0],data.curr_range[1])
-        #if data currently paused, re-plot
-        if self.is_timer_reversed:
-            #if in reverse switch back to forwards
-            self.timer.timeout.connect(self.update_plot_data)
-            self.timer.timeout.connect(self.update_plot_data)
-            self.is_timer_reversed = False
-            self.timer.start()
-        if not self.timer.isActive():
-            #if data currently paused, re-plot
-            self.main_graph.plot(data.visible_xdata, data.visible_ydata[0], clear=True)
-
-    #Skip to current data when forward skip button is selected
-    def fskip_to_current_pos(self):
-        #if data currently paused, re-plot
-        data_min, data_max = data.hidden_range
-        data.curr_range = [data_min, data_max]
-
-
-    #Change Plotting timer speed
-    def change_plotting_speed(self, index):
-        if index == 0:
-            speed_val = 1
-        else:
-            speed_val = self.speeds[index-1]
-        #alter the inncrement of visible data to change speed of plotting
-        data.incr = int(speed_val*3000)
-        print(data.incr)
-
-
-
+        #NEURAL DATA VIEWER WIDGET
+        #Add custom widget to main window
+        self.neural_data_viewer = Neural_Data_Window()
+        self.setCentralWidget(self.neural_data_viewer.graph_container)
 
 
 #***RUN THE WINDOW***#
@@ -311,6 +316,4 @@ main = MainWindow()
 main.show()
 
 #start the event loop
-print(main.window_width, main.window_height)
 app.exec_()
-print(main.window_width, main.window_height)
